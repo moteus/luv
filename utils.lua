@@ -3,6 +3,9 @@ local table = require('table')
 
 local utils = {}
 
+local IS_WINDOWS = package.config:sub(1,1) == '\\'
+if IS_WINDOWS then utils._useColors = false end
+
 local colors = {
   black   = "0;30",
   red     = "0;31",
