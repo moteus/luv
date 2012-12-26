@@ -284,9 +284,10 @@ static int luv_is_active(lua_State* L) {
 static void on_walk(uv_handle_t* handle, void* arg) {
   luv_callback_t* callback = (luv_callback_t*)arg;
   lua_State* L = callback->L;
+  luv_handle_t* lhandle;
   /* Get the callback and push the type */
   lua_rawgeti(L, LUA_REGISTRYINDEX, callback->ref);
-  luv_handle_t* lhandle = (luv_handle_t*)handle->data;
+  lhandle = (luv_handle_t*)handle->data;
   assert(L == lhandle->L); // Make sure the lua states match
   lua_rawgeti(L, LUA_REGISTRYINDEX, lhandle->ref);
 
@@ -304,8 +305,8 @@ static int luv_walk(lua_State* L) {
 #ifdef LUV_STACK_CHECK
   int top = lua_gettop(L);
 #endif
-  luaL_checktype(L, 1, LUA_TFUNCTION);
   luv_callback_t callback;
+  luaL_checktype(L, 1, LUA_TFUNCTION);
   /* Store the callback as a ref */
   callback.L = L;
   lua_pushvalue(L, 1);
@@ -610,12 +611,13 @@ static int luv_write(lua_State* L) {
 
   if (lua_istable(L, 2)) {
     int length, i;
+    uv_buf_t* bufs;
     length = lua_rawlen(L, 2);
-    uv_buf_t* bufs = malloc(sizeof(uv_buf_t) * length);
+    bufs = malloc(sizeof(uv_buf_t) * length);
     for (i = 0; i < length; i++) {
-      lua_rawgeti(L, 2, i + 1);
       size_t len;
       const char* chunk = luaL_checklstring(L, -1, &len);
+      lua_rawgeti(L, 2, i + 1);
       bufs[i] = uv_buf_init((char*)chunk, len);
       lua_pop(L, 1);
     }
@@ -831,9 +833,10 @@ static int luv_tcp_connect(lua_State* L) {
   lreq->lhandle = handle->data;
 
   if (uv_tcp_connect(req, handle, address, luv_after_connect)) {
+    uv_err_t err;
     free(req->data);
     free(req);
-    uv_err_t err = uv_last_error(uv_default_loop());
+    err = uv_last_error(uv_default_loop());
     return luaL_error(L, "tcp_connect: %s", uv_strerror(err));
   }
 
@@ -870,8 +873,9 @@ static int luv_tcp_nodelay(lua_State* L) {
   int top = lua_gettop(L);
 #endif
   uv_tcp_t* handle = luv_get_tcp(L, 1);
+  int enable;
   luaL_checkany(L, 2);
-  int enable = lua_toboolean(L, 2);
+  enable = lua_toboolean(L, 2);
   if (uv_tcp_nodelay(handle, enable)) {
     uv_err_t err = uv_last_error(uv_default_loop());
     return luaL_error(L, "tcp_nodelay: %s", uv_strerror(err));
@@ -890,9 +894,10 @@ static int luv_tcp_keepalive(lua_State* L) {
   int top = lua_gettop(L);
 #endif
   uv_tcp_t* handle = luv_get_tcp(L, 1);
-  luaL_checkany(L, 2);
-  int enable = lua_toboolean(L, 2);
+  int enable;
   unsigned int delay;
+  luaL_checkany(L, 2);
+  enable = lua_toboolean(L, 2);
   if (enable) {
     delay = luaL_checkint(L, 3);
   }
@@ -1008,6 +1013,31 @@ static int luv_pipe_connect(lua_State* L) {
 
 /******************************************************************************/
 
+#ifdef _WIN32
+ #ifndef S_ISDIR
+   #define S_ISDIR(mode)  (mode&_S_IFDIR)
+ #endif
+ #ifndef S_ISREG
+   #define S_ISREG(mode)  (mode&_S_IFREG)
+ #endif
+ #ifndef S_ISLNK
+   #define S_ISLNK(mode)  (0)
+ #endif
+ #ifndef S_ISSOCK
+   #define S_ISSOCK(mode)  (0)
+ #endif
+ #ifndef S_ISFIFO
+   #define S_ISFIFO(mode)  (0)
+ #endif
+ #ifndef S_ISCHR
+   #define S_ISCHR(mode)  (mode&_S_IFCHR)
+ #endif
+ #ifndef S_ISBLK
+   #define S_ISBLK(mode)  (0)
+ #endif
+#endif
+
+
 static void luv_push_stats_table(lua_State* L, uv_statbuf_t* s) {
   lua_newtable(L);
   lua_pushinteger(L, s->st_dev);
@@ -1053,6 +1083,26 @@ static void luv_push_stats_table(lua_State* L, uv_statbuf_t* s) {
   lua_setfield(L, -2, "blocks");
 #endif
 }
+
+#ifndef O_RDONLY 
+/* File status flags for open() and fcntl().  POSIX Table 6-5. */
+#define O_APPEND       02000    /* set append mode */
+#define O_NONBLOCK     04000    /* no delay */
+
+/* File access modes for open() and fcntl().  POSIX Table 6-6. */
+#define O_RDONLY           0    /* open(name, O_RDONLY) opens read only */
+#define O_WRONLY           1    /* open(name, O_WRONLY) opens write only */
+#define O_RDWR             2    /* open(name, O_RDWR) opens read/write */
+
+/* Mask for use with file access modes.  POSIX Table 6-7. */
+#define O_ACCMODE         03    /* mask for file access modes */
+
+#define O_CREAT        00100    /* creat file if it doesn't exist */
+#define O_EXCL         00200    /* exclusive use flag */
+#define O_NOCTTY       00400    /* do not assign a controlling terminal */
+#define O_TRUNC        01000    /* truncate flag */
+
+#endif
 
 static int luv_string_to_flags(lua_State* L, const char* string) {
   if (strcmp(string, "r") == 0) return O_RDONLY;
@@ -1154,6 +1204,7 @@ static void on_fs(uv_fs_t *req) {
   luaL_unref(L, LUA_REGISTRYINDEX, callback->ref);
   free(callback);
 
+  {
   int argc;
   if (req->result == -1) {
     push_fs_error(L, req);
@@ -1169,6 +1220,7 @@ static void on_fs(uv_fs_t *req) {
   free(req);
 
   luv_call(L, argc, 0);
+  }
 }
 
 #define FS_CALL(func, index, ...)                                              \
@@ -1180,13 +1232,13 @@ static void on_fs(uv_fs_t *req) {
       free(req);                                                               \
       return lua_error(L);                                                     \
     }                                                                          \
-    int argc = push_fs_result(L, req);                                         \
+    {int argc = push_fs_result(L, req);                                        \
     uv_fs_req_cleanup(req);                                                    \
     free(req);                                                                 \
-    return argc;                                                               \
+    return argc;}                                                              \
   }                                                                            \
   luaL_checktype(L, index, LUA_TFUNCTION);                                     \
-  luv_callback_t* callback = malloc(sizeof(*callback));                        \
+  {luv_callback_t* callback = malloc(sizeof(*callback));                       \
   callback->L = L;                                                             \
   lua_pushvalue(L, index);                                                     \
   callback->ref = luaL_ref(L, LUA_REGISTRYINDEX);                              \
@@ -1197,13 +1249,13 @@ static void on_fs(uv_fs_t *req) {
     free(req);                                                                 \
     return lua_error(L);                                                       \
   }                                                                            \
-  return 0;                                                                    \
+  return 0;}                                                                   \
 
 // HACK: Hacked version that patches req->ptr to hold buffer
 // TODO: get this into libuv itself, there is no reason it couldn't store this
 // for us.
 #define FS_CALL2(func, index, ...)                                             \
-  uv_fs_t* req = malloc(sizeof(*req));                                         \
+  {uv_fs_t* req = malloc(sizeof(*req));                                        \
   if (lua_isnone(L, index)) {                                                  \
     if (uv_fs_##func(uv_default_loop(), req, __VA_ARGS__, NULL) < 0) {         \
       push_fs_error(L, req);                                                   \
@@ -1211,14 +1263,14 @@ static void on_fs(uv_fs_t *req) {
       free(req);                                                               \
       return lua_error(L);                                                     \
     }                                                                          \
-    req->ptr = buffer;                                              /* HACK */ \
-    int argc = push_fs_result(L, req);                                         \
+    req->ptr = buffer;                                              /* HACK */  \
+    {int argc = push_fs_result(L, req);                                        \
     uv_fs_req_cleanup(req);                                                    \
     free(req);                                                                 \
-    return argc;                                                               \
+    return argc;}                                                              \
   }                                                                            \
   luaL_checktype(L, index, LUA_TFUNCTION);                                     \
-  luv_callback_t* callback = malloc(sizeof(*callback));                        \
+  {luv_callback_t* callback = malloc(sizeof(*callback));                       \
   callback->L = L;                                                             \
   lua_pushvalue(L, index);                                                     \
   callback->ref = luaL_ref(L, LUA_REGISTRYINDEX);                              \
@@ -1229,8 +1281,8 @@ static void on_fs(uv_fs_t *req) {
     free(req);                                                                 \
     return lua_error(L);                                                       \
   }                                                                            \
-  req->ptr = buffer;                                                /* HACK */ \
-  return 0;                                                                    \
+  req->ptr = buffer;                                                /* HACK */  \
+  return 0;}}                                                                  \
 
 
 static int luv_fs_open(lua_State* L) {
@@ -1252,8 +1304,8 @@ static int luv_fs_read(lua_State* L) {
   if (!lua_isnil(L, 3)) {
     offset = luaL_checkint(L, 3);
   }
-  char* buffer = malloc(length + 1);
-  FS_CALL2(read, 4, file, buffer, length, offset);
+  {char* buffer = malloc(length + 1);
+  FS_CALL2(read, 4, file, buffer, length, offset);}
 }
 
 static int luv_fs_write(lua_State* L) {
@@ -1261,8 +1313,8 @@ static int luv_fs_write(lua_State* L) {
   size_t length;
   const char* string = luaL_checklstring(L, 2, &length);
   char* buffer = malloc(length + 1);
-  uv_strlcpy(buffer, string, length + 1);
   off_t offset = -1;
+  uv_strlcpy(buffer, string, length + 1);
   if (!lua_isnil(L, 3)) {
     offset = luaL_checkint(L, 3);
   }

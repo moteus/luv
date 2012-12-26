@@ -1,7 +1,7 @@
 local utils = require('utils')
 local p = utils.prettyPrint
 
-local port = os.getenv("IP") or "0.0.0.0"
+local port = os.getenv("IP") or "127.0.0.1"
 
 local uv = require('luv')
 

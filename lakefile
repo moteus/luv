@@ -1,0 +1,64 @@
+PROJECT = 'luv'
+
+if LUA_VER == '5.2' then
+  LUA_NEED = 'lua52'
+  LUA_DIR  = ENV.LUA_DIR_5_2 or ENV.LUA_DIR
+  LUA_RUNNER = 'lua52'
+else
+  LUA_NEED = 'lua51'
+  LUA_DIR  = ENV.LUA_DIR
+  LUA_RUNNER = 'lua'
+end
+
+DYNAMIC  = DYNAMIC or false
+
+UV_NEED = IF(DYNAMIC, 'uv-static-md', 'uv-static-mt')
+SOCK_NEED = IF(WINDOWS,'winsock2','sockets')
+
+INSTALL_DIR = INSTALL_DIR or J(LUA_DIR,'libs',PROJECT)
+
+luv = c.shared{"luv";
+  -- base     = 'src';
+  src      = {'luv.c','common.c'};
+  needs    = {LUA_NEED,UV_NEED,SOCK_NEED};
+  dynamic  = DYNAMIC;
+  strip    = true,
+  defines  = L{
+    "NDEBUG";
+    IF(WINDOWS, {
+      "WINDOWS";
+      "_USERDLL";
+      "_WINDOWS";
+      "_USRDLL";
+      "_WINDLL";
+    });
+  };
+  libflags = IF(MSVC, '/EXPORT:luaopen_' .. PROJECT);
+  libs = IF(WINDOWS, {"iphlpapi", "psapi","advapi32"})
+}
+
+target('build', luv)
+
+install = target('install', {
+  file.group{odir=J(INSTALL_DIR, 'share'); src = luv };
+  file.group{odir=J(INSTALL_DIR, 'test');  src = 'utils.lua'};
+  file.group{odir=J(INSTALL_DIR, 'test');  src = 'test*.lua'};
+})
+
+local function run(file, cwd)
+  print()
+  print("run " .. file)
+  if not TESTING then
+    if cwd then lake.chdir(cwd) end
+    os.execute( LUA_RUNNER .. ' ' .. file )
+    if cwd then lake.chdir("<") end
+    print()
+  end
+end
+
+target('test', install, function()
+  local test_dir = J(INSTALL_DIR,'test')
+  run(J(test_dir,'test-timer.lua'), test_dir)
+  run(J(test_dir,'test-tcp.lua'), test_dir)
+end)
+
