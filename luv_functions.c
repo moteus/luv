@@ -616,8 +616,9 @@ static int luv_write(lua_State* L) {
     bufs = malloc(sizeof(uv_buf_t) * length);
     for (i = 0; i < length; i++) {
       size_t len;
-      const char* chunk = luaL_checklstring(L, -1, &len);
+      const char* chunk;
       lua_rawgeti(L, 2, i + 1);
+      chunk = luaL_checklstring(L, -1, &len);
       bufs[i] = uv_buf_init((char*)chunk, len);
       lua_pop(L, 1);
     }
